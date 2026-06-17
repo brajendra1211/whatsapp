@@ -101,10 +101,17 @@ function WhatsAppSetup() {
     webhookCallbackUrl: "",
     inboxWebhookCallbackUrl: "",
     hasWebhookVerifyToken: false,
+    hasMetaAppSecret: false,
+  });
+  const [metaForm, setMetaForm] = useState({
+    appId: "",
+    configId: "",
+    appSecret: "",
   });
   const [status, setStatus] = useState({ connected: false, connection: null });
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [savingMetaConfig, setSavingMetaConfig] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [webhookToken, setWebhookToken] = useState("");
   const [notice, setNotice] = useState({ type: "", text: "" });
@@ -123,7 +130,13 @@ function WhatsAppSetup() {
         API.get("/whatsapp-setup/status"),
       ]);
 
-      setConfig(configRes.data || {});
+      const setupConfig = configRes.data || {};
+      setConfig(setupConfig);
+      setMetaForm({
+        appId: setupConfig.appId || "",
+        configId: setupConfig.configId || "",
+        appSecret: "",
+      });
       setStatus(statusRes.data || { connected: false, connection: null });
     } catch (error) {
       showNotice("error", error?.response?.data?.message || "Failed to load WhatsApp setup");
@@ -162,10 +175,10 @@ function WhatsAppSetup() {
   }, []);
 
   const connectWithFacebook = async () => {
-    if (!config.appId || !config.configId) {
+    if (!config.appId || !config.configId || !config.hasMetaAppSecret) {
       showNotice(
         "error",
-        "META_APP_ID and META_EMBEDDED_SIGNUP_CONFIG_ID are required in backend .env"
+        "Meta App Configuration save karo: App ID, Config ID, aur App Secret required hain."
       );
       return;
     }
@@ -261,6 +274,50 @@ function WhatsAppSetup() {
     }
   };
 
+  const saveMetaConfiguration = async () => {
+    const payload = {
+      appId: metaForm.appId.trim(),
+      configId: metaForm.configId.trim(),
+    };
+
+    if (!payload.appId || !payload.configId) {
+      showNotice("error", "Meta App ID and Embedded Signup Config ID are required");
+      return;
+    }
+
+    if (metaForm.appSecret.trim()) {
+      payload.appSecret = metaForm.appSecret.trim();
+    } else if (!config.hasMetaAppSecret) {
+      showNotice("error", "Meta App Secret is required");
+      return;
+    }
+
+    try {
+      setSavingMetaConfig(true);
+      const res = await API.post("/whatsapp-setup/meta-app-config", payload);
+
+      setConfig((current) => ({
+        ...current,
+        appId: res.data?.appId || payload.appId,
+        configId: res.data?.configId || payload.configId,
+        apiVersion: res.data?.apiVersion || current.apiVersion,
+        hasMetaAppSecret: Boolean(res.data?.hasMetaAppSecret),
+        metaAppConfigSource: res.data?.metaAppConfigSource || current.metaAppConfigSource,
+      }));
+      setMetaForm((current) => ({
+        ...current,
+        appId: res.data?.appId || payload.appId,
+        configId: res.data?.configId || payload.configId,
+        appSecret: "",
+      }));
+      showNotice("success", res.data?.message || "Meta app configuration saved");
+    } catch (error) {
+      showNotice("error", error?.response?.data?.message || "Failed to save Meta app config");
+    } finally {
+      setSavingMetaConfig(false);
+    }
+  };
+
   const saveWebhookToken = async () => {
     if (!webhookToken.trim()) {
       showNotice("error", "Verify token is required");
@@ -328,6 +385,57 @@ function WhatsAppSetup() {
       </section>
 
       <div style={styles.grid}>
+        <div style={styles.card}>
+          <h3 style={styles.cardTitle}>Meta App Configuration</h3>
+
+          <label style={styles.fieldLabel}>Meta App ID</label>
+          <input
+            style={styles.input}
+            value={metaForm.appId}
+            onChange={(event) =>
+              setMetaForm((current) => ({ ...current, appId: event.target.value }))
+            }
+            placeholder="Enter Meta App ID"
+          />
+
+          <label style={styles.fieldLabel}>Embedded Signup Config ID</label>
+          <input
+            style={styles.input}
+            value={metaForm.configId}
+            onChange={(event) =>
+              setMetaForm((current) => ({ ...current, configId: event.target.value }))
+            }
+            placeholder="Enter Embedded Signup Config ID"
+          />
+
+          <label style={styles.fieldLabel}>App Secret</label>
+          <input
+            style={styles.input}
+            type="password"
+            value={metaForm.appSecret}
+            onChange={(event) =>
+              setMetaForm((current) => ({ ...current, appSecret: event.target.value }))
+            }
+            placeholder={
+              config.hasMetaAppSecret
+                ? "Secret saved. Leave blank to keep current secret."
+                : "Enter Meta App Secret"
+            }
+            autoComplete="new-password"
+          />
+
+          <button style={styles.saveButton} onClick={saveMetaConfiguration} disabled={savingMetaConfig}>
+            <FaSave />
+            {savingMetaConfig ? "Saving..." : "Save Meta Config"}
+          </button>
+
+          <p style={styles.helperText}>
+            {config.hasMetaAppSecret
+              ? "Meta app config is ready for this login. Connect this company's WABA and phone number from this page."
+              : "Save this company's Meta config before using Continue with Facebook."}
+          </p>
+        </div>
+
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>Webhook Verification</h3>
 

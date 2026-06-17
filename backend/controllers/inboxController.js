@@ -3,6 +3,7 @@ const Contact = require("../models/Contact");
 const Audience = require("../models/Audience");
 const ConversationState = require("../models/ConversationState");
 const FlowExecution = require("../models/FlowExecution");
+const WhatsAppConnection = require("../models/WhatsAppConnection");
 const { sendTextMessage } = require("../services/whatsappService");
 
 const normalizePhone = (phone = "") => {
@@ -20,6 +21,21 @@ const normalizePhone = (phone = "") => {
 };
 
 const LEAD_STAGES = ["new", "interested", "site_visit", "negotiation", "closed", "lost"];
+
+const getWhatsAppCredentials = async (userId) => {
+  const connection = await WhatsAppConnection.findOne({
+    userId,
+    status: "connected",
+  });
+
+  if (!connection) return null;
+
+  return {
+    accessToken: connection.accessToken,
+    phoneNumberId: connection.phoneNumberId,
+    wabaId: connection.wabaId,
+  };
+};
 
 const buildContactProfilePayload = (body = {}) => {
   const payload = {};
@@ -178,9 +194,17 @@ exports.sendReply = async (req, res) => {
       });
     }
 
+    const credentials = await getWhatsAppCredentials(req.user._id);
+    if (!credentials) {
+      return res.status(400).json({
+        message: "WhatsApp account is not connected for this user. Please connect it from WhatsApp Setup.",
+      });
+    }
+
     const apiResponse = await sendTextMessage({
       to: normalizedPhone,
       body: message,
+      credentials,
     });
 
     const newMessage = await Message.create({

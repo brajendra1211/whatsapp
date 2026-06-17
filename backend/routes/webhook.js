@@ -92,32 +92,33 @@ router.post("/", async (req, res) => {
       const waMessageId = inbound.id || "";
       const contactName = inbound.profile?.name || "";
 
-      const existingOutbound = await Message.findOne({
-        phone: from,
-        direction: "outbound",
-      }).sort({ createdAt: -1 });
-
-      const connection = !existingOutbound?.userId && metadata.phone_number_id
+      const connection = metadata.phone_number_id
         ? await WhatsAppConnection.findOne({
             phoneNumberId: metadata.phone_number_id,
             status: "connected",
           })
         : null;
-      const userId = existingOutbound?.userId || connection?.userId || null;
+      const userId = connection?.userId || null;
+      const existingOutbound = await Message.findOne({
+        phone: from,
+        direction: "outbound",
+        ...(userId ? { userId } : {}),
+      }).sort({ createdAt: -1 });
+      const resolvedUserId = userId || existingOutbound?.userId || null;
 
-      if (!userId) {
+      if (!resolvedUserId) {
         continue;
       }
 
       const optedOut = isOptOutText(text);
       const contact = await Contact.findOneAndUpdate(
         {
-          userId,
+          userId: resolvedUserId,
           phone: from,
         },
         {
           $setOnInsert: {
-            userId,
+            userId: resolvedUserId,
             phone: from,
             name: existingOutbound?.name || contactName || from,
           },
@@ -142,7 +143,7 @@ router.post("/", async (req, res) => {
       await Message.create({
         campaignId: existingOutbound?.campaignId || null,
         contactId: existingOutbound?.contactId || contact?._id || null,
-        userId,
+        userId: resolvedUserId,
         phone: from,
         name: existingOutbound?.name || contact?.name || contactName || "",
         direction: "inbound",
@@ -171,9 +172,9 @@ router.post("/", async (req, res) => {
         continue;
       }
 
-      if (userId) {
+      if (resolvedUserId) {
         const resumed = await resumeAwaitingReplyFlows({
-          userId,
+          userId: resolvedUserId,
           phone: from,
           message: text,
         });
@@ -183,7 +184,7 @@ router.post("/", async (req, res) => {
         }
 
         await triggerFlowsForInbound({
-          userId,
+          userId: resolvedUserId,
           phone: from,
           name: existingOutbound?.name || contactName || "",
           message: text,

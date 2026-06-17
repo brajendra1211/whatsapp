@@ -11,7 +11,7 @@ const getWhatsAppCredentials = async (userId) => {
     status: "connected",
   });
 
-  if (!connection) return {};
+  if (!connection) return null;
 
   return {
     accessToken: connection.accessToken,
@@ -85,13 +85,24 @@ exports.createTemplate = async (req, res) => {
     });
 
     try {
+      const credentials = await getWhatsAppCredentials(req.user._id);
+      if (!credentials) {
+        template.metaStatus = "SUBMISSION_FAILED";
+        await template.save();
+
+        return res.status(400).json({
+          message: "WhatsApp account is not connected for this user. Please connect it from WhatsApp Setup.",
+          template,
+        });
+      }
+
       const metaRes = await createMetaTemplate({
         name,
         content,
         category,
         language,
         buttons,
-        credentials: await getWhatsAppCredentials(req.user._id),
+        credentials,
       });
 
       template.metaTemplateId = metaRes.id || "";
@@ -174,9 +185,14 @@ exports.deleteTemplate = async (req, res) => {
 
 exports.syncMetaTemplateStatuses = async (req, res) => {
   try {
-    const metaData = await fetchMetaTemplates(
-      await getWhatsAppCredentials(req.user._id)
-    );
+    const credentials = await getWhatsAppCredentials(req.user._id);
+    if (!credentials) {
+      return res.status(400).json({
+        message: "WhatsApp account is not connected for this user. Please connect it from WhatsApp Setup.",
+      });
+    }
+
+    const metaData = await fetchMetaTemplates(credentials);
     const metaTemplates = Array.isArray(metaData?.data) ? metaData.data : [];
 
     const localTemplates = await Template.find({ userId: req.user._id });

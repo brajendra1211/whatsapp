@@ -8,12 +8,36 @@ import {
 } from "react-icons/fa";
 import { navigationSections } from "../config/navigation.jsx";
 
+const defaultUser = { name: "WhatsApp User", email: "" };
+
+const getStoredUser = () => {
+  const localToken = localStorage.getItem("token");
+  const sessionToken = sessionStorage.getItem("token");
+  const storedUser = localToken
+    ? localStorage.getItem("user")
+    : sessionToken
+      ? sessionStorage.getItem("user")
+      : localStorage.getItem("user") || sessionStorage.getItem("user");
+
+  if (!storedUser) return defaultUser;
+
+  try {
+    const parsed = JSON.parse(storedUser);
+    return {
+      name: parsed?.name || parsed?.email || defaultUser.name,
+      email: parsed?.email || defaultUser.email,
+    };
+  } catch {
+    return defaultUser;
+  }
+};
+
 function Sidebar() {
   const navigate = useNavigate();
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 992);
   const [isOpen, setIsOpen] = useState(window.innerWidth > 992);
-  const [user, setUser] = useState({ name: "Admin User", email: "admin@company.com" });
+  const [user] = useState(getStoredUser);
 
   useEffect(() => {
     const handleResize = () => {
@@ -24,22 +48,6 @@ function Sidebar() {
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  useEffect(() => {
-    const storedUser = localStorage.getItem("user") || sessionStorage.getItem("user");
-
-    if (!storedUser) return;
-
-    try {
-      const parsed = JSON.parse(storedUser);
-      setUser({
-        name: parsed?.name || parsed?.email || "Admin User",
-        email: parsed?.email || "admin@company.com",
-      });
-    } catch {
-      setUser({ name: "Admin User", email: "admin@company.com" });
-    }
   }, []);
 
   const logout = () => {
@@ -95,7 +103,7 @@ function Sidebar() {
                   <FaWhatsapp />
                 </div>
                 <div>
-                  <h2 style={styles.brandTitle}>Navkaar CRM</h2>
+                  <h2 style={styles.brandTitle}>{user.name}</h2>
                   <p style={styles.brandSub}>WhatsApp Growth Panel</p>
                 </div>
               </div>

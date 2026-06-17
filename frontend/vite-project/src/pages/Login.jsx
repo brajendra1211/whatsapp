@@ -54,7 +54,13 @@ function Login() {
       const storage = remember ? localStorage : sessionStorage;
       storage.setItem("token", res.data.token);
       storage.setItem("user", JSON.stringify(res.data.user || {}));
-      if (!remember) localStorage.removeItem("token");
+      if (remember) {
+        sessionStorage.removeItem("token");
+        sessionStorage.removeItem("user");
+      } else {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+      }
 
       navigate("/dashboard");
     } catch (err) {

@@ -64,7 +64,7 @@ const getCredentials = async (userId) => {
     status: "connected",
   });
 
-  if (!connection) return {};
+  if (!connection) return null;
 
   return {
     accessToken: connection.accessToken,
@@ -137,6 +137,15 @@ const runExecution = async (execution) => {
   }
 
   const credentials = await getCredentials(execution.userId);
+  if (!credentials) {
+    execution.status = "failed";
+    execution.errorReason =
+      "WhatsApp account is not connected for this user. Please connect it from WhatsApp Setup.";
+    pushHistory(execution, execution.currentStepIndex, "failed", execution.errorReason);
+    await execution.save();
+    return execution;
+  }
+
   const contact = {
     name: execution.name,
     phone: execution.phone,

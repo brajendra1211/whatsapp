@@ -3,22 +3,37 @@ const AppSetting = require("../models/AppSetting");
 const WEBHOOK_VERIFY_TOKEN_KEY = "webhook_verify_token";
 
 const normalizeToken = (token = "") => String(token || "").trim();
+const getUserTokenKey = (userId) =>
+  userId ? `${WEBHOOK_VERIFY_TOKEN_KEY}:${String(userId)}` : WEBHOOK_VERIFY_TOKEN_KEY;
 
-const getSavedWebhookVerifyToken = async () => {
-  const setting = await AppSetting.findOne({ key: WEBHOOK_VERIFY_TOKEN_KEY }).lean();
-  return normalizeToken(setting?.value);
+const getSavedWebhookVerifyToken = async (userId) => {
+  const setting = await AppSetting.findOne({ key: getUserTokenKey(userId) }).lean();
+  if (normalizeToken(setting?.value)) return normalizeToken(setting.value);
+
+  if (!userId) return "";
+
+  const legacySetting = await AppSetting.findOne({ key: WEBHOOK_VERIFY_TOKEN_KEY }).lean();
+  return normalizeToken(legacySetting?.value);
+};
+
+const getSavedWebhookVerifyTokens = async () => {
+  const settings = await AppSetting.find({
+    key: { $regex: `^${WEBHOOK_VERIFY_TOKEN_KEY}(:|$)` },
+  }).lean();
+
+  return settings.map((setting) => normalizeToken(setting.value)).filter(Boolean);
 };
 
 const getWebhookVerifyTokens = async () => {
-  let savedToken = "";
+  let savedTokens = [];
 
   try {
-    savedToken = await getSavedWebhookVerifyToken();
+    savedTokens = await getSavedWebhookVerifyTokens();
   } catch (error) {
     console.error("Webhook verify token lookup warning:", error.message);
   }
 
-  const tokens = [normalizeToken(process.env.WEBHOOK_VERIFY_TOKEN), savedToken].filter(Boolean);
+  const tokens = [normalizeToken(process.env.WEBHOOK_VERIFY_TOKEN), ...savedTokens].filter(Boolean);
 
   return [...new Set(tokens)];
 };
@@ -31,7 +46,7 @@ const saveWebhookVerifyToken = async ({ token, userId }) => {
   }
 
   return AppSetting.findOneAndUpdate(
-    { key: WEBHOOK_VERIFY_TOKEN_KEY },
+    { key: getUserTokenKey(userId) },
     {
       value: normalizedToken,
       updatedBy: userId || null,

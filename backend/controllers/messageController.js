@@ -16,7 +16,7 @@ const getWhatsAppCredentials = async (userId) => {
     status: "connected",
   });
 
-  if (!connection) return {};
+  if (!connection) return null;
 
   return {
     accessToken: connection.accessToken,
@@ -158,6 +158,12 @@ const sendToSingleContact = async ({
 
 const executeCampaign = async (campaign) => {
   const credentials = await getWhatsAppCredentials(campaign.userId);
+  if (!credentials) {
+    campaign.status = "failed";
+    await campaign.save();
+    throw new Error("WhatsApp account is not connected for this user. Please connect it from WhatsApp Setup.");
+  }
+
   const contacts = await getAudienceContacts(campaign.userId, campaign.audience_id);
   const uniqueContacts = dedupeContactsByPhone(contacts).filter(
     (contact) => !contact.optOut
@@ -272,6 +278,11 @@ exports.sendTestMessage = async (req, res) => {
     const parsedButtons =
       typeof buttons === "string" ? JSON.parse(buttons || "[]") : buttons;
     const credentials = await getWhatsAppCredentials(req.user._id);
+    if (!credentials) {
+      return res.status(400).json({
+        message: "WhatsApp account is not connected for this user. Please connect it from WhatsApp Setup.",
+      });
+    }
 
     const result = await sendToSingleContact({
       contact: tempContact,
@@ -291,6 +302,7 @@ exports.sendTestMessage = async (req, res) => {
     return res.status(500).json({
       message:
         error?.response?.data?.error?.message ||
+        error.message ||
         "Failed to send test message",
     });
   }
@@ -391,7 +403,7 @@ exports.sendCampaign = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message:
-        error?.response?.data?.error?.message || "Campaign action failed",
+        error?.response?.data?.error?.message || error.message || "Campaign action failed",
     });
   }
 };

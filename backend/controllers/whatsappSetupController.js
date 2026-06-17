@@ -5,21 +5,28 @@ const {
   getSavedWebhookVerifyToken,
   saveWebhookVerifyToken,
 } = require("../services/webhookConfigService");
+const {
+  getMetaAppConfig,
+  saveMetaAppConfig,
+} = require("../services/metaAppConfigService");
 
 const API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
 
-const requireMetaAppConfig = () => {
+const requireMetaAppConfig = async (userId) => {
+  const metaConfig = await getMetaAppConfig(userId);
   const missing = [];
 
-  if (!process.env.META_APP_ID) missing.push("META_APP_ID");
-  if (!process.env.META_APP_SECRET) missing.push("META_APP_SECRET");
-  if (!process.env.META_EMBEDDED_SIGNUP_CONFIG_ID) {
+  if (!metaConfig.appId) missing.push("META_APP_ID");
+  if (!metaConfig.appSecret) missing.push("META_APP_SECRET");
+  if (!metaConfig.configId) {
     missing.push("META_EMBEDDED_SIGNUP_CONFIG_ID");
   }
 
   if (missing.length) {
     throw new Error(`Missing Meta app configuration: ${missing.join(", ")}`);
   }
+
+  return metaConfig;
 };
 
 const getGraphErrorMessage = (error) => {
@@ -38,13 +45,16 @@ const getGraphErrorMessage = (error) => {
 
 exports.getSetupConfig = async (req, res) => {
   try {
-    const savedVerifyToken = await getSavedWebhookVerifyToken();
+    const savedVerifyToken = await getSavedWebhookVerifyToken(req.user?._id);
     const callbackUrls = buildWebhookCallbackUrls(req);
+    const metaConfig = await getMetaAppConfig(req.user?._id);
 
     return res.json({
-      appId: process.env.META_APP_ID || "",
-      configId: process.env.META_EMBEDDED_SIGNUP_CONFIG_ID || "",
-      apiVersion: API_VERSION,
+      appId: metaConfig.appId,
+      configId: metaConfig.configId,
+      apiVersion: metaConfig.apiVersion,
+      hasMetaAppSecret: metaConfig.hasAppSecret,
+      metaAppConfigSource: metaConfig.source,
       webhookCallbackUrl: callbackUrls.primary,
       inboxWebhookCallbackUrl: callbackUrls.inboxAlias,
       hasWebhookVerifyToken: Boolean(process.env.WEBHOOK_VERIFY_TOKEN || savedVerifyToken),
@@ -75,6 +85,32 @@ exports.saveWebhookConfig = async (req, res) => {
   }
 };
 
+exports.saveMetaAppConfig = async (req, res) => {
+  try {
+    const { appId, appSecret, configId } = req.body;
+
+    await saveMetaAppConfig({
+      appId,
+      appSecret,
+      configId,
+      userId: req.user?._id,
+    });
+
+    const metaConfig = await getMetaAppConfig(req.user?._id);
+
+    return res.json({
+      message: "Meta app configuration saved",
+      appId: metaConfig.appId,
+      configId: metaConfig.configId,
+      apiVersion: metaConfig.apiVersion,
+      hasMetaAppSecret: metaConfig.hasAppSecret,
+      metaAppConfigSource: metaConfig.source,
+    });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || "Failed to save Meta app config" });
+  }
+};
+
 exports.getConnectionStatus = async (req, res) => {
   try {
     const connection = await WhatsAppConnection.findOne({
@@ -93,7 +129,7 @@ exports.getConnectionStatus = async (req, res) => {
 
 exports.connectWhatsApp = async (req, res) => {
   try {
-    requireMetaAppConfig();
+    const metaConfig = await requireMetaAppConfig(req.user._id);
 
     const {
       code,
@@ -114,11 +150,11 @@ exports.connectWhatsApp = async (req, res) => {
     }
 
     const tokenRes = await axios.get(
-      `https://graph.facebook.com/${API_VERSION}/oauth/access_token`,
+      `https://graph.facebook.com/${metaConfig.apiVersion || API_VERSION}/oauth/access_token`,
       {
         params: {
-          client_id: process.env.META_APP_ID,
-          client_secret: process.env.META_APP_SECRET,
+          client_id: metaConfig.appId,
+          client_secret: metaConfig.appSecret,
           code,
         },
       }
@@ -131,7 +167,7 @@ exports.connectWhatsApp = async (req, res) => {
 
     try {
       await axios.post(
-        `https://graph.facebook.com/${API_VERSION}/${waba_id}/subscribed_apps`,
+        `https://graph.facebook.com/${metaConfig.apiVersion || API_VERSION}/${waba_id}/subscribed_apps`,
         null,
         {
           params: { access_token: accessToken },

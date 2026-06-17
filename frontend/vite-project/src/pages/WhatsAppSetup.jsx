@@ -13,6 +13,16 @@ import API from "../services/api";
 const loadFacebookSdk = (appId, apiVersion) =>
   new Promise((resolve, reject) => {
     if (window.FB) {
+      if (window.__waSdkAppId !== appId || window.__waSdkApiVersion !== apiVersion) {
+        window.FB.init({
+          appId,
+          cookie: true,
+          xfbml: true,
+          version: apiVersion,
+        });
+        window.__waSdkAppId = appId;
+        window.__waSdkApiVersion = apiVersion;
+      }
       resolve(window.FB);
       return;
     }
@@ -24,6 +34,8 @@ const loadFacebookSdk = (appId, apiVersion) =>
         xfbml: true,
         version: apiVersion,
       });
+      window.__waSdkAppId = appId;
+      window.__waSdkApiVersion = apiVersion;
       resolve(window.FB);
     };
 

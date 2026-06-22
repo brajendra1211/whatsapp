@@ -16,4 +16,22 @@ API.interceptors.request.use((req)=>{
 
 });
 
+API.interceptors.response.use(
+ (response) => response,
+ (error) => {
+  if (error?.response?.status === 401) {
+   localStorage.removeItem("token");
+   localStorage.removeItem("user");
+   sessionStorage.removeItem("token");
+   sessionStorage.removeItem("user");
+
+   if (window.location.pathname !== "/") {
+    window.location.href = "/";
+   }
+  }
+
+  return Promise.reject(error);
+ }
+);
+
 export default API;

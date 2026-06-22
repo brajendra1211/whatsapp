@@ -15,6 +15,41 @@ const isOptOutText = (text = "") => {
   return ["stop", "unsubscribe", "opt out", "optout", "cancel"].includes(body);
 };
 
+const normalizePhone = (phone = "") => {
+  let clean = String(phone || "").replace(/[^\d]/g, "");
+
+  if (clean.startsWith("0")) {
+    clean = clean.slice(1);
+  }
+
+  if (clean.length === 10) {
+    clean = `91${clean}`;
+  }
+
+  return clean;
+};
+
+const getInboundText = (message = {}) => {
+  if (message.text?.body) return message.text.body;
+  if (message.button?.text) return message.button.text;
+  if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title;
+  if (message.interactive?.list_reply?.title) return message.interactive.list_reply.title;
+  return "";
+};
+
+const findConnectionForWebhook = async (phoneNumberId) => {
+  if (phoneNumberId) {
+    const connection = await WhatsAppConnection.findOne({
+      phoneNumberId,
+      status: "connected",
+    });
+
+    if (connection) return connection;
+  }
+
+  return WhatsAppConnection.findOne({ status: "connected" }).sort({ connectedAt: -1 });
+};
+
 router.get("/", async (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -36,6 +71,13 @@ router.post("/", async (req, res) => {
     const statuses = body?.entry?.[0]?.changes?.[0]?.value?.statuses || [];
     const messages = body?.entry?.[0]?.changes?.[0]?.value?.messages || [];
     const metadata = body?.entry?.[0]?.changes?.[0]?.value?.metadata || {};
+    const contacts = body?.entry?.[0]?.changes?.[0]?.value?.contacts || [];
+    const contactByWaId = new Map(
+      contacts.map((contact) => [
+        normalizePhone(contact.wa_id || contact.input || ""),
+        contact.profile?.name || "",
+      ])
+    );
 
     for (const statusObj of statuses) {
       const waMessageId = statusObj.id;
@@ -87,17 +129,17 @@ router.post("/", async (req, res) => {
     }
 
     for (const inbound of messages) {
-      const from = inbound.from || "";
-      const text = inbound.text?.body || "";
+      const from = normalizePhone(inbound.from || "");
+      const text = getInboundText(inbound);
       const waMessageId = inbound.id || "";
-      const contactName = inbound.profile?.name || "";
+      const contactName = contactByWaId.get(from) || "";
 
-      const connection = metadata.phone_number_id
-        ? await WhatsAppConnection.findOne({
-            phoneNumberId: metadata.phone_number_id,
-            status: "connected",
-          })
-        : null;
+      if (!from) {
+        console.warn("Webhook inbound skipped: missing sender phone", inbound);
+        continue;
+      }
+
+      const connection = await findConnectionForWebhook(metadata.phone_number_id);
       const userId = connection?.userId || null;
       const existingOutbound = await Message.findOne({
         phone: from,
@@ -107,6 +149,10 @@ router.post("/", async (req, res) => {
       const resolvedUserId = userId || existingOutbound?.userId || null;
 
       if (!resolvedUserId) {
+        console.warn("Webhook inbound skipped: no user resolved", {
+          from,
+          phoneNumberId: metadata.phone_number_id,
+        });
         continue;
       }
 
@@ -196,6 +242,7 @@ router.post("/", async (req, res) => {
 
     return res.sendStatus(200);
   } catch (error) {
+    console.error("Webhook processing error:", error);
     return res.sendStatus(200);
   }
 });

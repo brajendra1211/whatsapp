@@ -293,10 +293,39 @@ exports.sendTestMessage = async (req, res) => {
       credentials,
     });
 
+    const contact = await Contact.findOneAndUpdate(
+      {
+        userId: req.user._id,
+        phone: result.normalizedPhone,
+      },
+      {
+        $setOnInsert: {
+          userId: req.user._id,
+          phone: result.normalizedPhone,
+          name: tempContact.name,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    await Message.create({
+      contactId: contact?._id || null,
+      userId: req.user._id,
+      phone: result.normalizedPhone,
+      name: contact?.name || tempContact.name,
+      direction: "outbound",
+      type: result.type,
+      message: result.finalMessage,
+      mediaUrl: req.file?.path || "",
+      waMessageId: result.apiResponse?.messages?.[0]?.id || "",
+      status: "sent",
+    });
+
     return res.json({
       message: "Test message sent successfully",
       waMessageId: result.apiResponse?.messages?.[0]?.id || "",
       phone: result.normalizedPhone,
+      inboxLogged: true,
     });
   } catch (error) {
     return res.status(500).json({

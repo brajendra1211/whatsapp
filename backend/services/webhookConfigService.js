@@ -33,7 +33,11 @@ const getWebhookVerifyTokens = async () => {
     console.error("Webhook verify token lookup warning:", error.message);
   }
 
-  const tokens = [normalizeToken(process.env.WEBHOOK_VERIFY_TOKEN), ...savedTokens].filter(Boolean);
+  const tokens = [
+    normalizeToken(process.env.WEBHOOK_VERIFY_TOKEN),
+    normalizeToken(process.env.META_VERIFY_TOKEN),
+    ...savedTokens,
+  ].filter(Boolean);
 
   return [...new Set(tokens)];
 };

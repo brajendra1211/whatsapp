@@ -12,6 +12,26 @@ const {
 
 const API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
 
+const cleanEnv = (value = "") => String(value || "").trim();
+
+const getDirectCloudApiConfig = () => ({
+  accessToken: cleanEnv(process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN),
+  phoneNumberId: cleanEnv(process.env.WHATSAPP_PHONE_NUMBER_ID),
+  wabaId: cleanEnv(process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || process.env.WHATSAPP_WABA_ID),
+  businessId: cleanEnv(process.env.WHATSAPP_BUSINESS_ID || process.env.META_BUSINESS_ID),
+  apiVersion: cleanEnv(process.env.WHATSAPP_API_VERSION) || API_VERSION,
+});
+
+const getDirectCloudApiMissing = (directConfig) => {
+  const missing = [];
+
+  if (!directConfig.accessToken) missing.push("WHATSAPP_TOKEN");
+  if (!directConfig.phoneNumberId) missing.push("WHATSAPP_PHONE_NUMBER_ID");
+  if (!directConfig.wabaId) missing.push("WHATSAPP_BUSINESS_ACCOUNT_ID");
+
+  return missing;
+};
+
 const requireMetaAppConfig = async (userId) => {
   const metaConfig = await getMetaAppConfig(userId);
   const missing = [];
@@ -48,6 +68,7 @@ exports.getSetupConfig = async (req, res) => {
     const savedVerifyToken = await getSavedWebhookVerifyToken(req.user?._id);
     const callbackUrls = buildWebhookCallbackUrls(req);
     const metaConfig = await getMetaAppConfig(req.user?._id);
+    const directConfig = getDirectCloudApiConfig();
 
     return res.json({
       appId: metaConfig.appId,
@@ -57,7 +78,16 @@ exports.getSetupConfig = async (req, res) => {
       metaAppConfigSource: metaConfig.source,
       webhookCallbackUrl: callbackUrls.primary,
       inboxWebhookCallbackUrl: callbackUrls.inboxAlias,
-      hasWebhookVerifyToken: Boolean(process.env.WEBHOOK_VERIFY_TOKEN || savedVerifyToken),
+      hasWebhookVerifyToken: Boolean(
+        process.env.WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || savedVerifyToken
+      ),
+      directCloudApi: {
+        hasAccessToken: Boolean(directConfig.accessToken),
+        hasPhoneNumberId: Boolean(directConfig.phoneNumberId),
+        hasWabaId: Boolean(directConfig.wabaId),
+        phoneNumberId: directConfig.phoneNumberId,
+        wabaId: directConfig.wabaId,
+      },
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load setup config" });
@@ -124,6 +154,100 @@ exports.getConnectionStatus = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to load WhatsApp status" });
+  }
+};
+
+exports.connectDirectCloudApi = async (req, res) => {
+  try {
+    const directConfig = getDirectCloudApiConfig();
+    const missing = getDirectCloudApiMissing(directConfig);
+
+    if (missing.length) {
+      return res.status(400).json({
+        message: `Missing Direct Cloud API configuration: ${missing.join(", ")}`,
+      });
+    }
+
+    const phoneRes = await axios.get(
+      `https://graph.facebook.com/${directConfig.apiVersion}/${directConfig.phoneNumberId}`,
+      {
+        params: {
+          fields: "id,display_phone_number,verified_name,quality_rating,platform_type",
+          access_token: directConfig.accessToken,
+        },
+      }
+    );
+
+    let wabaData = {};
+    let subscribeWarning = "";
+
+    try {
+      const wabaRes = await axios.get(
+        `https://graph.facebook.com/${directConfig.apiVersion}/${directConfig.wabaId}`,
+        {
+          params: {
+            fields: "id,name,currency,timezone_id",
+            access_token: directConfig.accessToken,
+          },
+        }
+      );
+      wabaData = wabaRes.data || {};
+    } catch (wabaError) {
+      throw new Error(`WABA verification failed: ${getGraphErrorMessage(wabaError)}`);
+    }
+
+    try {
+      await axios.post(
+        `https://graph.facebook.com/${directConfig.apiVersion}/${directConfig.wabaId}/subscribed_apps`,
+        null,
+        {
+          params: { access_token: directConfig.accessToken },
+        }
+      );
+    } catch (subscribeError) {
+      subscribeWarning = getGraphErrorMessage(subscribeError);
+      console.error("Direct Cloud API WABA subscribe warning:", subscribeWarning);
+    }
+
+    const connection = await WhatsAppConnection.findOneAndUpdate(
+      { userId: req.user._id },
+      {
+        accessToken: directConfig.accessToken,
+        wabaId: directConfig.wabaId,
+        phoneNumberId: directConfig.phoneNumberId,
+        businessId: directConfig.businessId,
+        status: "connected",
+        raw: {
+          source: "direct_cloud_api",
+          phoneNumber: phoneRes.data || {},
+          waba: wabaData,
+          subscribeWarning,
+        },
+        connectedAt: new Date(),
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).select("-accessToken -raw");
+
+    return res.json({
+      message: subscribeWarning
+        ? "Direct Cloud API verified. Webhook subscription needs review in Meta."
+        : "Direct Cloud API verified and connected successfully",
+      connected: true,
+      connection,
+      phoneNumber: {
+        id: phoneRes.data?.id || directConfig.phoneNumberId,
+        displayPhoneNumber: phoneRes.data?.display_phone_number || "",
+        verifiedName: phoneRes.data?.verified_name || "",
+        qualityRating: phoneRes.data?.quality_rating || "",
+      },
+      warning: subscribeWarning,
+    });
+  } catch (error) {
+    console.error("connectDirectCloudApi error:", getGraphErrorMessage(error));
+    return res.status(400).json({
+      message: getGraphErrorMessage(error),
+      metaError: error?.response?.data?.error || null,
+    });
   }
 };
 

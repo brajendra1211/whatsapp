@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FaCheckCircle,
+  FaCloud,
   FaCopy,
   FaExclamationTriangle,
   FaFacebook,
@@ -9,53 +10,7 @@ import {
   FaWhatsapp,
 } from "react-icons/fa";
 import API from "../services/api";
-
-const loadFacebookSdk = (appId, apiVersion) =>
-  new Promise((resolve, reject) => {
-    if (window.FB) {
-      if (window.__waSdkAppId !== appId || window.__waSdkApiVersion !== apiVersion) {
-        window.FB.init({
-          appId,
-          cookie: true,
-          xfbml: true,
-          version: apiVersion,
-        });
-        window.__waSdkAppId = appId;
-        window.__waSdkApiVersion = apiVersion;
-      }
-      resolve(window.FB);
-      return;
-    }
-
-    window.fbAsyncInit = function () {
-      window.FB.init({
-        appId,
-        cookie: true,
-        xfbml: true,
-        version: apiVersion,
-      });
-      window.__waSdkAppId = appId;
-      window.__waSdkApiVersion = apiVersion;
-      resolve(window.FB);
-    };
-
-    const existing = document.getElementById("facebook-jssdk");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.FB), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Failed to load Facebook SDK")), {
-        once: true,
-      });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "facebook-jssdk";
-    script.src = "https://connect.facebook.net/en_US/sdk.js";
-    script.async = true;
-    script.defer = true;
-    script.onerror = () => reject(new Error("Failed to load Facebook SDK"));
-    document.body.appendChild(script);
-  });
+import { loadFacebookSdk } from "../services/facebookSdk";
 
 const parseMaybeJson = (value) => {
   if (typeof value !== "string") return value;
@@ -114,6 +69,13 @@ function WhatsAppSetup() {
     inboxWebhookCallbackUrl: "",
     hasWebhookVerifyToken: false,
     hasMetaAppSecret: false,
+    directCloudApi: {
+      hasAccessToken: false,
+      hasPhoneNumberId: false,
+      hasWabaId: false,
+      phoneNumberId: "",
+      wabaId: "",
+    },
   });
   const [metaForm, setMetaForm] = useState({
     appId: "",
@@ -123,6 +85,7 @@ function WhatsAppSetup() {
   const [status, setStatus] = useState({ connected: false, connection: null });
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [verifyingDirect, setVerifyingDirect] = useState(false);
   const [savingMetaConfig, setSavingMetaConfig] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [webhookToken, setWebhookToken] = useState("");
@@ -277,6 +240,30 @@ function WhatsAppSetup() {
     }
   };
 
+  const verifyDirectCloudApi = async () => {
+    try {
+      setVerifyingDirect(true);
+      const res = await API.post("/whatsapp-setup/direct-connect");
+
+      setStatus({
+        connected: true,
+        connection: res.data?.connection,
+      });
+
+      showNotice(
+        res.data?.warning ? "error" : "success",
+        res.data?.message || "Direct Cloud API verified and connected"
+      );
+    } catch (error) {
+      showNotice(
+        "error",
+        error?.response?.data?.message || error.message || "Direct Cloud API verification failed"
+      );
+    } finally {
+      setVerifyingDirect(false);
+    }
+  };
+
   const copyText = async (text, label) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -397,6 +384,42 @@ function WhatsAppSetup() {
       </section>
 
       <div style={styles.grid}>
+        <div style={styles.card}>
+          <h3 style={styles.cardTitle}>Direct Cloud API</h3>
+          <p style={styles.helperText}>
+            Urgent IT ke own WhatsApp number ke liye signup popup skip karo. Env values verify karke current user ke liye WhatsApp connection save hoga.
+          </p>
+
+          <div style={styles.envStatusList}>
+            <div style={styles.envStatusItem}>
+              {config.directCloudApi?.hasAccessToken ? <FaCheckCircle /> : <FaExclamationTriangle />}
+              <span>WHATSAPP_TOKEN</span>
+            </div>
+            <div style={styles.envStatusItem}>
+              {config.directCloudApi?.hasPhoneNumberId ? <FaCheckCircle /> : <FaExclamationTriangle />}
+              <span>WHATSAPP_PHONE_NUMBER_ID</span>
+            </div>
+            <div style={styles.envStatusItem}>
+              {config.directCloudApi?.hasWabaId ? <FaCheckCircle /> : <FaExclamationTriangle />}
+              <span>WHATSAPP_BUSINESS_ACCOUNT_ID</span>
+            </div>
+          </div>
+
+          <div style={styles.directIds}>
+            <p>WABA ID: {config.directCloudApi?.wabaId || "-"}</p>
+            <p>Phone Number ID: {config.directCloudApi?.phoneNumberId || "-"}</p>
+          </div>
+
+          <button
+            style={styles.directButton}
+            onClick={verifyDirectCloudApi}
+            disabled={verifyingDirect}
+          >
+            <FaCloud />
+            {verifyingDirect ? "Verifying..." : "Verify Direct Cloud API"}
+          </button>
+        </div>
+
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>Meta App Configuration</h3>
 
@@ -538,6 +561,9 @@ function WhatsAppSetup() {
             <FaFacebook />
             {connecting ? "Opening Facebook..." : status.connected ? "Reconnect with Facebook" : "Continue with Facebook"}
           </button>
+          <p style={styles.helperText}>
+            Own Urgent IT number ke liye Direct Cloud API button use karo. Facebook popup sirf client/customer onboarding ke liye rakha gaya hai.
+          </p>
         </div>
 
         <div style={styles.card}>
@@ -728,11 +754,49 @@ const styles = {
     fontSize: "15px",
     marginTop: "16px",
   },
+  directButton: {
+    width: "100%",
+    minHeight: "52px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+    border: "none",
+    borderRadius: "8px",
+    background: "#0f172a",
+    color: "#fff",
+    fontWeight: 800,
+    cursor: "pointer",
+    fontSize: "15px",
+    marginTop: "16px",
+  },
   helperText: {
     margin: "12px 0 0",
     color: "#64748b",
     fontSize: "13px",
     lineHeight: 1.5,
+  },
+  envStatusList: {
+    display: "grid",
+    gap: "10px",
+    marginTop: "16px",
+  },
+  envStatusItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    color: "#334155",
+    fontSize: "13px",
+    fontWeight: 800,
+  },
+  directIds: {
+    marginTop: "14px",
+    padding: "12px",
+    borderRadius: "8px",
+    background: "#f8fafc",
+    color: "#475569",
+    fontSize: "13px",
+    lineHeight: 1.6,
   },
   connectedBox: {
     display: "flex",

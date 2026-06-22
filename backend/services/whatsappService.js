@@ -4,7 +4,7 @@ const FormData = require("form-data");
 
 const API_VERSION = process.env.WHATSAPP_API_VERSION || "v21.0";
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-const TOKEN = process.env.WHATSAPP_TOKEN;
+const TOKEN = process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN;
 
 const getRuntimeConfig = (credentials = {}) => ({
   phoneNumberId: credentials.phoneNumberId || PHONE_NUMBER_ID,

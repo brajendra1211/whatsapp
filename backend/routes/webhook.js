@@ -72,6 +72,15 @@ router.post("/", async (req, res) => {
     const messages = body?.entry?.[0]?.changes?.[0]?.value?.messages || [];
     const metadata = body?.entry?.[0]?.changes?.[0]?.value?.metadata || {};
     const contacts = body?.entry?.[0]?.changes?.[0]?.value?.contacts || [];
+
+    if (statuses.length || messages.length) {
+      console.log("WhatsApp webhook received", {
+        statuses: statuses.length,
+        messages: messages.length,
+        phoneNumberId: metadata.phone_number_id || "",
+      });
+    }
+
     const contactByWaId = new Map(
       contacts.map((contact) => [
         normalizePhone(contact.wa_id || contact.input || ""),
@@ -137,6 +146,13 @@ router.post("/", async (req, res) => {
       if (!from) {
         console.warn("Webhook inbound skipped: missing sender phone", inbound);
         continue;
+      }
+
+      if (waMessageId) {
+        const existingInbound = await Message.findOne({ waMessageId });
+        if (existingInbound) {
+          continue;
+        }
       }
 
       const connection = await findConnectionForWebhook(metadata.phone_number_id);

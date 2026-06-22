@@ -62,6 +62,8 @@ app.use("/api/audience", audienceRoutes);
 app.use("/api/inbox", inboxRoutes);
 app.use("/api/whatsapp-setup", whatsappSetupRoutes);
 app.use("/api/message-flows", messageFlowRoutes);
+app.use("/api/webhook", webhookRoutes);
+app.use("/api/whatsapp/webhook", webhookRoutes);
 app.use("/webhook", webhookRoutes);
 app.use("/inbox", webhookRoutes);
 app.get("/", (req, res) => {
